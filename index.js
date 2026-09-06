@@ -2,7 +2,7 @@ const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const openapi = require('./openapi.json');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Parse JSON request bodies (e.g. POST /tasks).
 app.use(express.json());
