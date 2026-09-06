@@ -3,7 +3,7 @@
   "info": {
     "title": "Task API",
     "version": "1.0",
-    "description": "In-memory CRUD API for tasks."
+    "description": "In-memory CRUD API for tasks with search, filtering, and stats."
   },
   "servers": [
     {
@@ -11,13 +11,55 @@
     }
   ],
   "paths": {
+    "/": {
+      "get": {
+        "summary": "API information",
+        "description": "Returns basic API metadata and available endpoints.",
+        "responses": {
+          "200": {
+            "description": "API metadata"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns status ok if the server is running.",
+        "responses": {
+          "200": {
+            "description": "Health status"
+          }
+        }
+      }
+    },
     "/tasks": {
       "get": {
         "summary": "List all tasks",
         "operationId": "listTasks",
+        "parameters": [
+          {
+            "name": "done",
+            "in": "query",
+            "required": false,
+            "description": "Filter tasks by completion status (true or false)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Filter tasks containing search term in title",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "All tasks",
+            "description": "All tasks matching filter criteria",
             "content": {
               "application/json": {
                 "schema": {
@@ -63,7 +105,7 @@
                   "$ref": "#/components/schemas/Error"
                 },
                 "example": {
-                  "error": "title is required and cannot be empty"
+                  "error": "Title is required and cannot be empty"
                 }
               }
             }
@@ -143,23 +185,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
-                },
-                "examples": {
-                  "emptyBody": {
-                    "value": {
-                      "error": "request body must include title and/or done"
-                    }
-                  },
-                  "emptyTitle": {
-                    "value": {
-                      "error": "title cannot be empty"
-                    }
-                  },
-                  "invalidDone": {
-                    "value": {
-                      "error": "done must be a boolean"
-                    }
-                  }
                 }
               }
             }
@@ -198,6 +223,35 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "summary": "Task statistics",
+        "description": "Calculates and returns counts for total, done, and open tasks.",
+        "responses": {
+          "200": {
+            "description": "Computed task statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reset": {
+      "post": {
+        "summary": "Reset database seed",
+        "description": "Restores the in-memory task array to the initial 3 example tasks.",
+        "responses": {
+          "200": {
+            "description": "Tasks reset confirmation"
           }
         }
       }
@@ -250,6 +304,28 @@
           "done": {
             "type": "boolean",
             "example": true
+          }
+        }
+      },
+      "StatsResponse": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "open"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "example": 3
+          },
+          "done": {
+            "type": "integer",
+            "example": 0
+          },
+          "open": {
+            "type": "integer",
+            "example": 3
           }
         }
       },
