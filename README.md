@@ -1,10 +1,10 @@
-# 📝 Task CRUD API
+#  Task CRUD API
 
 A clean, lightweight, in-memory RESTful CRUD API built with **Node.js** and **Express**, featuring interactive **Swagger UI** documentation, input validation, search, filtering, and stats computing.
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 You can clone and start the API in under 1 minute:
 
@@ -19,15 +19,15 @@ The server will start at **`http://localhost:3000`**.
 
 ---
 
-## 📖 API Documentation (Swagger UI)
+##  API Documentation (Swagger UI)
 
 Interactive OpenAPI 3.0 documentation is available right out of the box. You can test all endpoints directly in your browser:
 
-👉 **[http://localhost:3000/docs](http://localhost:3000/docs)**
+ **[http://localhost:3000/docs](http://localhost:3000/docs)**
 
 ---
 
-## 🚀 Endpoints Summary
+##  Endpoints Summary
 
 | Method | Endpoint | Description | Request Body | Success Status | Error Statuses |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -44,7 +44,7 @@ Interactive OpenAPI 3.0 documentation is available right out of the box. You can
 
 ---
 
-## 🧪 Testing with `curl`
+##  Testing with `curl`
 
 ### 1. Root & Health
 ```bash
@@ -134,7 +134,7 @@ Content-Type: application/json; charset=utf-8
 
 ---
 
-## 🔬 The Mortality Experiment
+##  The Mortality Experiment
 
 > **Observation:** When tasks are created or updated, they only live in the server's volatile RAM (the in-memory JavaScript array). As soon as the Node.js server process terminates or restarts, all mutations disappear and the state resets back to the initial hardcoded seed items.
 > 
@@ -142,7 +142,33 @@ Content-Type: application/json; charset=utf-8
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 - **Runtime:** Node.js (v20+)
 - **Framework:** Express 5
 - **Documentation:** Swagger UI (`swagger-ui-express`) & OpenAPI 3.0
+
+---
+
+## AI vs Me (Stage 7 Rematch)
+
+### Prompt Used
+```text
+I am reviewing the previous AI-generated backend implementation against my requirements. Regenerate the solution with strict adherence to the requested API behavior, including correct HTTP status codes, input validation, edge-case handling, and the specified OpenAPI structure. Before generating the code, identify any ambiguous requirements and make reasonable decisions without inventing functionality. Ensure the final implementation is clean, modular, and production-ready.
+```
+
+### 1. What the AI Did Better
+- **Path Parameter Type Guarding:** The AI version added strict integer validation (`if (!Number.isInteger(id) || id <= 0)`) returning `400 Bad Request` on non-numeric IDs like `/tasks/abc` before searching memory.
+- **Export & Testability:** Wrapped `app.listen()` inside `if (require.main === module)` and exported `app`, enabling seamless automated testing with supertest/jest without occupying live ports.
+- **Explicit Status Codes:** Explicitly used `.status(200).json(...)` across all success endpoints rather than relying on default Express behavior.
+
+### 2. What the AI Got Wrong or Quietly Ignored
+- **Initial Assumption on Port Binding:** Initially defaulted to port 4000 to avoid conflicting with the primary app, requiring explicit environment configuration if meant to be a drop-in replacement.
+- **Query Parameter Strictness:** Initially treated missing search terms as empty strings rather than throwing 400, until explicit validation rules were enforced.
+
+### 3. What the Prompt Forgot to Specify & What the AI Decided
+- **Invalid Path Param Status Code:** The prompt did not specify whether `GET /tasks/abc` should return `404` or `400`. The AI chose `400 Bad Request` for invalid integer formats and `404 Not Found` for valid but non-existent integers.
+- **Swagger Documentation Linking:** Decided whether to embed swagger specs inline vs load from `openapi.json`. AI reused the structured `../openapi.json` file to maintain single source of truth.
+
+### Rematch Conclusion
+Writing the solution by hand in Stages 0–6 provided the exact mental model needed to rigorously review AI-generated code, spot missing edge-case validations, and enforce strict REST status code contracts.
+
