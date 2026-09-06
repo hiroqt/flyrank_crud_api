@@ -1,6 +1,7 @@
 const express = require('express');
 const swaggerUi = require('swagger-ui-express');
-const openapi = require('./openapi.json');
+const swaggerJsdoc = require('swagger-jsdoc');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -22,24 +23,145 @@ function resetTasks() {
   tasks.push(...SEED_TASKS.map((task) => ({ ...task })));
 }
 
-// OpenAPI spec — interactive docs at /docs.
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapi));
+// Swagger JSDoc Configuration
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.3',
+    info: {
+      title: 'Task API',
+      version: '1.0',
+      description: 'In-memory CRUD API for tasks generated dynamically with swagger-jsdoc, featuring pagination, search, and filtering.',
+    },
+    servers: [
+      {
+        url: `http://localhost:${port}`,
+        description: 'Local development server',
+      },
+    ],
+    components: {
+      schemas: {
+        Task: {
+          type: 'object',
+          required: ['id', 'title', 'done'],
+          properties: {
+            id: { type: 'integer', example: 1 },
+            title: { type: 'string', example: 'Buy groceries' },
+            done: { type: 'boolean', example: false },
+          },
+        },
+        CreateTaskRequest: {
+          type: 'object',
+          required: ['title'],
+          properties: {
+            title: { type: 'string', example: 'Buy milk' },
+          },
+        },
+        UpdateTaskRequest: {
+          type: 'object',
+          minProperties: 1,
+          properties: {
+            title: { type: 'string', example: 'Buy oat milk' },
+            done: { type: 'boolean', example: true },
+          },
+        },
+        StatsResponse: {
+          type: 'object',
+          required: ['total', 'done', 'open'],
+          properties: {
+            total: { type: 'integer', example: 3 },
+            done: { type: 'integer', example: 1 },
+            open: { type: 'integer', example: 2 },
+          },
+        },
+        Error: {
+          type: 'object',
+          required: ['error'],
+          properties: {
+            error: { type: 'string', example: 'Task not found' },
+          },
+        },
+      },
+    },
+  },
+  apis: ['./index.js'],
+};
 
-// API metadata — lists available endpoints for clients and docs.
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
+// OpenAPI spec — interactive docs at /docs
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+/**
+ * @openapi
+ * /:
+ *   get:
+ *     summary: API information
+ *     description: Returns basic API metadata and available endpoints.
+ *     responses:
+ *       200:
+ *         description: API metadata
+ */
 app.get('/', (req, res) => {
   res.json({
     name: 'Task API',
     version: '1.0',
-    endpoints: ['/tasks', '/stats', '/reset'],
+    endpoints: ['/tasks', '/stats', '/reset', '/docs'],
   });
 });
 
-// Liveness check for load balancers and monitoring.
+/**
+ * @openapi
+ * /health:
+ *   get:
+ *     summary: Health check
+ *     description: Liveness check for monitoring and load balancers.
+ *     responses:
+ *       200:
+ *         description: Server is healthy
+ */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Query params after ? filter the list — they are not part of the address.
+/**
+ * @openapi
+ * /tasks:
+ *   get:
+ *     summary: List all tasks
+ *     description: Retrieves tasks with optional filtering, search, and pagination.
+ *     parameters:
+ *       - name: done
+ *         in: query
+ *         schema:
+ *           type: boolean
+ *         description: Filter tasks by completion status (true or false)
+ *       - name: search
+ *         in: query
+ *         schema:
+ *           type: string
+ *         description: Case-insensitive substring search in task titles
+ *       - name: limit
+ *         in: query
+ *         schema:
+ *           type: integer
+ *         description: Maximum number of tasks to return (pagination)
+ *       - name: offset
+ *         in: query
+ *         schema:
+ *           type: integer
+ *         description: Number of tasks to skip (pagination)
+ *     responses:
+ *       200:
+ *         description: List of tasks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Task'
+ *       400:
+ *         description: Invalid query parameters
+ */
 app.get('/tasks', (req, res) => {
   let result = tasks;
 
@@ -60,10 +182,42 @@ app.get('/tasks', (req, res) => {
     result = result.filter((t) => t.title.toLowerCase().includes(lower));
   }
 
+  // Pagination: limit and offset
+  if (req.query.limit !== undefined) {
+    const limit = Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+    const offset = req.query.offset !== undefined ? Number(req.query.offset) : 0;
+    if (!Number.isInteger(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    result = result.slice(offset, offset + limit);
+  } else if (req.query.offset !== undefined) {
+    const offset = Number(req.query.offset);
+    if (!Number.isInteger(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    result = result.slice(offset);
+  }
+
   res.json(result);
 });
 
-// Derived counts — the server computes, not just stores.
+/**
+ * @openapi
+ * /stats:
+ *   get:
+ *     summary: Derived task counts
+ *     description: Returns computed metrics (total, done, open).
+ *     responses:
+ *       200:
+ *         description: Task statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StatsResponse'
+ */
 app.get('/stats', (req, res) => {
   const done = tasks.filter((t) => t.done).length;
   res.json({
@@ -73,22 +227,54 @@ app.get('/stats', (req, res) => {
   });
 });
 
-// Restore the 3 seed tasks (handy for demos and testing).
+/**
+ * @openapi
+ * /reset:
+ *   post:
+ *     summary: Restore seed tasks
+ *     description: Restores the 3 demo tasks for demos and testing.
+ *     responses:
+ *       200:
+ *         description: Seed tasks restored
+ */
 app.post('/reset', (req, res) => {
   resetTasks();
   res.json(tasks);
 });
 
-// Create a task. Client sends { "title": "..." }; server assigns id and done=false.
+/**
+ * @openapi
+ * /tasks:
+ *   post:
+ *     summary: Create a new task
+ *     description: Creates a task with server-assigned ID and done=false.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateTaskRequest'
+ *     responses:
+ *       201:
+ *         description: Task created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Task'
+ *       400:
+ *         description: Missing or empty title
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 app.post('/tasks', (req, res) => {
   const { title } = req.body;
 
-  // Business rule: never trust the client — title must be present and non-empty.
   if (title === undefined || title === null || String(title).trim() === '') {
     return res.status(400).json({ error: 'title is required and cannot be empty' });
   }
 
-  // Next free id is one above the current highest (handles gaps if tasks are removed later).
   const id = tasks.length === 0 ? 1 : Math.max(...tasks.map((t) => t.id)) + 1;
   const task = { id, title: String(title).trim(), done: false };
 
@@ -96,12 +282,31 @@ app.post('/tasks', (req, res) => {
   res.status(201).json(task);
 });
 
-// :id is a path parameter — the number in /tasks/2 comes from the URL, not the body.
+/**
+ * @openapi
+ * /tasks/{id}:
+ *   get:
+ *     summary: Get task by ID
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Task found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Task'
+ *       404:
+ *         description: Task not found
+ */
 app.get('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
   const task = tasks.find((t) => t.id === id);
 
-  // 404, not an empty 200 — status codes tell machines whether the resource exists.
   if (!task) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
@@ -109,7 +314,35 @@ app.get('/tasks/:id', (req, res) => {
   res.json(task);
 });
 
-// Update title and/or done on an existing task (partial body is OK).
+/**
+ * @openapi
+ * /tasks/{id}:
+ *   put:
+ *     summary: Update a task
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateTaskRequest'
+ *     responses:
+ *       200:
+ *         description: Task updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Task'
+ *       400:
+ *         description: Invalid request body
+ *       404:
+ *         description: Task not found
+ */
 app.put('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
   const task = tasks.find((t) => t.id === id);
@@ -143,7 +376,23 @@ app.put('/tasks/:id', (req, res) => {
   res.json(task);
 });
 
-// Remove a task. 204 = success with no response body.
+/**
+ * @openapi
+ * /tasks/{id}:
+ *   delete:
+ *     summary: Delete a task
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       204:
+ *         description: Task deleted
+ *       404:
+ *         description: Task not found
+ */
 app.delete('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
   const index = tasks.findIndex((t) => t.id === id);

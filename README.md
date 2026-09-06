@@ -33,14 +33,14 @@ Interactive OpenAPI 3.0 documentation is available right out of the box. You can
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/` | API metadata & version | None | `200 OK` | — |
 | `GET` | `/health` | Server health check | None | `200 OK` | — |
-| `GET` | `/tasks` | List all tasks (supports `?done=true` & `?search=gym`) | None | `200 OK` | — |
+| `GET` | `/tasks` | List tasks (supports `?done=`, `?search=`, `?limit=`, `?offset=`) | None | `200 OK` | `400 Bad Request` |
 | `POST` | `/tasks` | Create a new task | `{"title": "Buy milk"}` | `201 Created` | `400 Bad Request` |
 | `GET` | `/tasks/:id` | Get single task by ID | None | `200 OK` | `404 Not Found` |
 | `PUT` | `/tasks/:id` | Update title and/or done status | `{"title": "...", "done": true}` | `200 OK` | `400 Bad Request`, `404 Not Found` |
 | `DELETE` | `/tasks/:id` | Remove a task | None | `204 No Content` | `404 Not Found` |
 | `GET` | `/stats` | Task statistics (`total`, `done`, `open`) | None | `200 OK` | — |
 | `POST` | `/reset` | Reset tasks to 3 seed items | None | `200 OK` | — |
-| `GET` | `/docs` | Interactive Swagger UI docs | None | `200 OK` | — |
+| `GET` | `/docs` | Dynamic Swagger UI docs generated with `swagger-jsdoc` | None | `200 OK` | — |
 
 ---
 
@@ -50,7 +50,7 @@ Interactive OpenAPI 3.0 documentation is available right out of the box. You can
 ```bash
 curl -i http://localhost:3000/
 # HTTP/1.1 200 OK
-# {"name":"Task API","version":"1.0.0","endpoints":["/tasks"]}
+# {"name":"Task API","version":"1.0","endpoints":["/tasks","/stats","/reset","/docs"]}
 
 curl -i http://localhost:3000/health
 # HTTP/1.1 200 OK
@@ -82,19 +82,25 @@ Content-Type: application/json; charset=utf-8
 
 [
   {"id":1,"title":"Buy groceries","done":false},
-  {"id":2,"title":"Go to gym","done":false},
+  {"id":2,"title":"Walk the dog","done":true},
   {"id":3,"title":"Read a book","done":false},
   {"id":4,"title":"Buy milk","done":false}
 ]
 ```
 
-### 4. Query Filtering & Search
+### 4. Query Filtering, Search & Pagination
 ```bash
 # Filter by completion
 curl -i "http://localhost:3000/tasks?done=false"
 
 # Substring search
 curl -i "http://localhost:3000/tasks?search=milk"
+
+# Pagination: limit & offset (first page of 2 items)
+curl -i "http://localhost:3000/tasks?limit=2&offset=0"
+
+# Pagination: next page
+curl -i "http://localhost:3000/tasks?limit=2&offset=2"
 ```
 
 ### 5. Update Task (`PUT /tasks/:id`)
@@ -129,8 +135,20 @@ curl -i http://localhost:3000/stats
 HTTP/1.1 200 OK
 Content-Type: application/json; charset=utf-8
 
-{"total":3,"done":0,"open":3}
+{"total":3,"done":1,"open":2}
 ```
+
+---
+
+## 📄 Why Real APIs Never Return "Everything" (The Need for Pagination)
+
+> Real production systems store millions of records. Returning "everything" without pagination causes critical failures:
+> 1. **Server Out-Of-Memory (OOM) Crashes:** Querying 500,000 database records into Node.js memory exhausts the heap allocation and crashes the server process.
+> 2. **Network Payload Saturation:** Multi-megabyte JSON responses choke bandwidth, especially on mobile connections, causing severe latency and timeouts.
+> 3. **Database Performance Degradation:** Full table scans without `LIMIT` and `OFFSET` (or keyset pagination) lock tables, overwhelm disk I/O, and starve concurrent user queries.
+> 4. **User Experience:** Frontend clients and mobile apps only display a visible viewport of 10–20 items at a time (e.g. infinite scroll or paginated tables).
+> 
+> By implementing `limit` and `offset`, the server controls resource consumption while delivering fast, sub-millisecond response times.
 
 ---
 
@@ -145,7 +163,7 @@ Content-Type: application/json; charset=utf-8
 ## Tech Stack
 - **Runtime:** Node.js (v20+)
 - **Framework:** Express 5
-- **Documentation:** Swagger UI (`swagger-ui-express`) & OpenAPI 3.0
+- **Documentation:** `swagger-ui-express` & `swagger-jsdoc` (JSDoc annotations generating OpenAPI 3.0)
 
 ---
 
