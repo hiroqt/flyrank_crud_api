@@ -52,6 +52,52 @@ app.get('/tasks/:id', (req, res) => {
   }
   res.json(task)
 });
+//Update title and/or done field of a task
+app.put('/tasks/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const task = tasks.find((t) => t.id === id);
+
+  if (!task) {
+    return res.status(404).json({ error: `Task ${id} not found` });
+  }
+
+  const { title, done } = req.body ?? {};
+  const hasTitle = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'title');
+  const hasDone = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'done');
+
+  if (!hasTitle && !hasDone) {
+    return res.status(400).json({ error: 'request body must include title and/or done' });
+  }
+
+  if (hasTitle) {
+    if (title === null || String(title).trim() === '') {
+      return res.status(400).json({ error: 'title cannot be empty' });
+    }
+    task.title = String(title).trim();
+  }
+
+  if (hasDone) {
+    if (typeof done !== 'boolean') {
+      return res.status(400).json({ error: 'done must be a boolean' });
+    }
+    task.done = done;
+  }
+
+  res.json(task);
+});
+
+// Remove a task. 204 = success with no response body.
+app.delete('/tasks/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const index = tasks.findIndex((t) => t.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: `Task ${id} not found` });
+  }
+
+  tasks.splice(index, 1);
+  res.status(204).send();
+});
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
