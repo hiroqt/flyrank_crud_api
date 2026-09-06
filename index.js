@@ -1,9 +1,15 @@
 const express = require('express');
+const swaggerUi = require('swagger-ui-express');
+const swaggerDocument = require('./openapi.json');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 //Parse JSON request bodies
 app.use(express.json());
+
+// OpenAPI spec - interactive docs at /docs
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapi));
 
 //Constant value for tasks
 const tasks = [
