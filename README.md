@@ -243,3 +243,17 @@ Writing the solution by hand in Stages 0–6 provided the exact mental model nee
 ### 3. One-Command Quickstart
 ```bash
 npm start
+```
+*(Or `npm run dev` for auto-reloading with `--watch`)*
+
+### 4. Database Schema (with Timestamps)
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Auto-generated unique identifier |
+| `title` | `TEXT NOT NULL` | Task description string |
+| `done` | `INTEGER NOT NULL DEFAULT 0` | Completion flag (`0` for false, `1` for true) |
+| `created_at` | `DATETIME DEFAULT CURRENT_TIMESTAMP` | Record creation timestamp |
+| `updated_at` | `DATETIME DEFAULT CURRENT_TIMESTAMP` | Last updated timestamp |
+
+### 5. Why Database Migrations Exist (Reflection)
+> Adding new columns (`created_at`, `updated_at`) to an existing database required either altering the schema or deleting `tasks.db` to let it recreate. In production systems with real user data, deleting the database file is impossible without losing data — which is why database migrations exist to safely evolve schemas over time without disruption.

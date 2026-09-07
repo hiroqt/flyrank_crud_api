@@ -12,12 +12,14 @@ app.use(express.json());
 // SQLite database connection
 const db = new Database('tasks.db');
 
-// Create table if it does not already exist
+// Create table if it does not already exist (with timestamps)
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
 
@@ -191,20 +193,64 @@ const formatTask = (row) => ({
   id: row.id,
   title: row.title,
   done: Boolean(row.done),
+  created_at: row.created_at,
+  updated_at: row.updated_at,
 });
 
 app.get('/tasks', (req, res) => {
-  // Query all tasks from SQLite
-  const rows = db.prepare('SELECT * FROM tasks').all();
+  let query = 'SELECT id, title, done, created_at, updated_at FROM tasks WHERE 1=1';
+  const params = [];
 
-  // Format done as boolean (SQLite stores booleans as 0 or 1)
-  const tasks = rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    done: Boolean(row.done),
-  }));
+  // Filter by completion status
+  if (req.query.done !== undefined) {
+    if (req.query.done !== 'true' && req.query.done !== 'false') {
+      return res.status(400).json({ error: 'done must be true or false' });
+    }
+    const done = req.query.done === 'true' ? 1 : 0;
+    query += ' AND done = ?';
+    params.push(done);
+  }
 
-  res.json(tasks);
+  // SQL LIKE search
+  if (req.query.search !== undefined) {
+    const word = String(req.query.search).trim();
+    if (word === '') {
+      return res.status(400).json({ error: 'search must not be empty' });
+    }
+    query += ' AND LOWER(title) LIKE ?';
+    params.push(`%${word.toLowerCase()}%`);
+  }
+
+  // Sort alphabetically or by id
+  if (req.query.sort === 'title') {
+    query += ' ORDER BY title COLLATE NOCASE ASC';
+  } else {
+    query += ' ORDER BY id ASC';
+  }
+
+  // Pagination: limit and offset
+  if (req.query.limit !== undefined) {
+    const limit = Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+    const offset = req.query.offset !== undefined ? Number(req.query.offset) : 0;
+    if (!Number.isInteger(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    query += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+  } else if (req.query.offset !== undefined) {
+    const offset = Number(req.query.offset);
+    if (!Number.isInteger(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    query += ' LIMIT -1 OFFSET ?';
+    params.push(offset);
+  }
+
+  const rows = db.prepare(query).all(...params);
+  res.json(rows.map(formatTask));
 });
 
 /**
@@ -249,7 +295,7 @@ app.get('/stats', (req, res) => {
  */
 app.post('/reset', (req, res) => {
   resetTasks();
-  const rows = db.prepare('SELECT id, title, done FROM tasks').all();
+  const rows = db.prepare('SELECT id, title, done, created_at, updated_at FROM tasks').all();
   res.json(rows.map(formatTask));
 });
 
@@ -282,27 +328,19 @@ app.post('/reset', (req, res) => {
 app.post('/tasks', (req, res) => {
   const { title } = req.body ?? {};
 
-  //1. Validation
-  if (title === undefined || title === null
-    || String(title).trim() === "") {
-    return res.status(400).json({ error: "Missing or empty title" });
+  // 1. Validation
+  if (title === undefined || title === null || String(title).trim() === '') {
+    return res.status(400).json({ error: 'Missing or empty title' });
   }
   const cleanTitle = String(title).trim();
 
-  //2. Insert into SQLite with parametreized query
-  const stmt = db.prepare(
-    'INSERT INTO tasks (title, done) VALUES (?, ?)'
-  );
+  // 2. Insert into SQLite with parameterized query
+  const stmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
   const info = stmt.run(cleanTitle, 0);
 
-  //3. Return created task + 201 Created
-  const newTask = {
-    id: info.lastInsertRowid,
-    title: cleanTitle,
-    done: false,
-  };
-  //4. Return 201 with new tasks
-  res.status(201).json(newTask);
+  // 3. Return created task + 201 Created
+  const newTask = db.prepare('SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json(formatTask(newTask));
 });
 
 /**
@@ -328,20 +366,13 @@ app.post('/tasks', (req, res) => {
  */
 app.get('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
+  const row = db.prepare('SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = ?').get(id);
 
-  // Parameterized query: pass id to .get() to prevent SQL injection
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-
-  // 3. Unknown IDs return 404
   if (!row) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
-  res.json({
-    id: row.id,
-    title: row.title,
-    done: Boolean(row.done),
-  });
+  res.json(formatTask(row));
 });
 
 /**
@@ -376,51 +407,45 @@ app.get('/tasks/:id', (req, res) => {
 app.put('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
 
-  //1.Fetch existing task if ID exist
-  const existing = db.prepare(
-    'SElECT id, title, done FROM tasks WHERE id = ?'
-  ).get(id);
+  // 1. Fetch existing task if ID exists
+  const existing = db.prepare('SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = ?').get(id);
   if (!existing) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
-  //2. Validation of request body
+  // 2. Validation of request body
   const { title, done } = req.body ?? {};
-  const hasTitle =
-    Object.prototype.hasOwnProperty.call(req.body ?? {},
-      'title'
-    )
-  const hasDone =
-    Object.prototype.hasOwnProperty.call(req.body ?? {},
-      'done'
-    )
+  const hasTitle = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'title');
+  const hasDone = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'done');
+
   if (!hasTitle && !hasDone) {
     return res.status(400).json({ error: 'request body must include title and/or done' });
   }
+
   let newTitle = existing.title;
   let newDone = existing.done;
+
   if (hasTitle) {
     if (title === null || String(title).trim() === '') {
       return res.status(400).json({ error: 'title cannot be empty' });
     }
     newTitle = String(title).trim();
   }
+
   if (hasDone) {
     if (typeof done !== 'boolean') {
       return res.status(400).json({ error: 'done must be a boolean' });
     }
     newDone = done ? 1 : 0;
   }
-  // 3. Run parameterized UPDATE query
-  db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(newTitle, newDone, id);
-  // 4. Return updated task with done as boolean
-  res.json({
-    id,
-    title: newTitle,
-    done: Boolean(newDone),
-  });
-});
 
+  // 3. Run parameterized UPDATE query with updated_at timestamp
+  db.prepare('UPDATE tasks SET title = ?, done = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newTitle, newDone, id);
+
+  // 4. Return updated task with timestamps
+  const updated = db.prepare('SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = ?').get(id);
+  res.json(formatTask(updated));
+});
 
 /**
  * @openapi
