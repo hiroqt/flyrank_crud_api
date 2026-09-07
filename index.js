@@ -41,7 +41,7 @@ function resetTasks() {
   db.exec('DELETE FROM tasks');
   try {
     db.exec("DELETE FROM sqlite_sequence WHERE name = 'tasks'");
-  } catch (e) {}
+  } catch (e) { }
   const insertTask = db.prepare('INSERT INTO tasks (id, title, done) VALUES (?, ?, ?)');
   for (const task of SEED_TASKS) {
     insertTask.run(task.id, task.title, task.done);
@@ -194,50 +194,17 @@ const formatTask = (row) => ({
 });
 
 app.get('/tasks', (req, res) => {
-  let query = 'SELECT id, title, done FROM tasks WHERE 1=1';
-  const params = [];
+  // Query all tasks from SQLite
+  const rows = db.prepare('SELECT * FROM tasks').all();
 
-  if (req.query.done !== undefined) {
-    if (req.query.done !== 'true' && req.query.done !== 'false') {
-      return res.status(400).json({ error: 'done must be true or false' });
-    }
-    const done = req.query.done === 'true' ? 1 : 0;
-    query += ' AND done = ?';
-    params.push(done);
-  }
+  // Format done as boolean (SQLite stores booleans as 0 or 1)
+  const tasks = rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    done: Boolean(row.done),
+  }));
 
-  if (req.query.search !== undefined) {
-    const word = String(req.query.search).trim();
-    if (word === '') {
-      return res.status(400).json({ error: 'search must not be empty' });
-    }
-    query += ' AND LOWER(title) LIKE ?';
-    params.push(`%${word.toLowerCase()}%`);
-  }
-
-  // Pagination: limit and offset
-  if (req.query.limit !== undefined) {
-    const limit = Number(req.query.limit);
-    if (!Number.isInteger(limit) || limit <= 0) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
-    }
-    const offset = req.query.offset !== undefined ? Number(req.query.offset) : 0;
-    if (!Number.isInteger(offset) || offset < 0) {
-      return res.status(400).json({ error: 'offset must be a non-negative integer' });
-    }
-    query += ' LIMIT ? OFFSET ?';
-    params.push(limit, offset);
-  } else if (req.query.offset !== undefined) {
-    const offset = Number(req.query.offset);
-    if (!Number.isInteger(offset) || offset < 0) {
-      return res.status(400).json({ error: 'offset must be a non-negative integer' });
-    }
-    query += ' LIMIT -1 OFFSET ?';
-    params.push(offset);
-  }
-
-  const rows = db.prepare(query).all(...params);
-  res.json(rows.map(formatTask));
+  res.json(tasks);
 });
 
 /**
@@ -353,13 +320,20 @@ app.post('/tasks', (req, res) => {
  */
 app.get('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
-  const row = db.prepare('SELECT id, title, done FROM tasks WHERE id = ?').get(id);
 
+  // Parameterized query: pass id to .get() to prevent SQL injection
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+
+  // 3. Unknown IDs return 404
   if (!row) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
-  res.json(formatTask(row));
+  res.json({
+    id: row.id,
+    title: row.title,
+    done: Boolean(row.done),
+  });
 });
 
 /**
