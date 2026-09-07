@@ -167,7 +167,7 @@ Content-Type: application/json; charset=utf-8
 
 ---
 
-## AI vs Me (Stage 7 Rematch)
+## AI vs Me (Rematch — In-Memory API)
 
 ### Prompt Used
 ```text
@@ -189,6 +189,31 @@ I am reviewing the previous AI-generated backend implementation against my requi
 
 ### Rematch Conclusion
 Writing the solution by hand in Stages 0–6 provided the exact mental model needed to rigorously review AI-generated code, spot missing edge-case validations, and enforce strict REST status code contracts.
+
+---
+
+## AI vs Me (Database Rematch — SQLite Migration)
+
+### Migration Prompt Used
+```text
+Migrate my Node.js Express CRUD API to use SQLite via better-sqlite3. On startup, connect to tasks.db and create the tasks table if missing with columns: id (INTEGER PRIMARY KEY AUTOINCREMENT), title (TEXT NOT NULL), done (INTEGER NOT NULL DEFAULT 0), created_at (DATETIME DEFAULT CURRENT_TIMESTAMP), and updated_at (DATETIME DEFAULT CURRENT_TIMESTAMP). Seed 3 example tasks only when the table is empty (COUNT(*) === 0). Update all 5 endpoints (GET /tasks, POST /tasks, GET /tasks/:id, PUT /tasks/:id, DELETE /tasks/:id) to query the database using parameterized queries (?), preserving all 400 and 404 error rules and returning done as a boolean.
+```
+
+### 1. What the AI Did Better
+- **Atomic Bulk Seeding with Transactions:** The AI wrapped initial row insertions inside `db.transaction(...)`, ensuring all 3 seed tasks are inserted atomically.
+- **Strict Path Parameter Type Guarding:** The AI added integer validation (`if (!Number.isInteger(id) || id <= 0)`) in `GET`, `PUT`, and `DELETE /tasks/:id` to return `400 Bad Request` on non-numeric IDs like `/tasks/abc` before hitting SQLite.
+- **Modular Test Export:** Wrapped `app.listen()` inside `if (require.main === module)` and exported `module.exports = app`, making the API easily testable with integration test runners without occupying network ports.
+
+### 2. What the AI Got Wrong or Quietly Ignored
+- **Missing Pagination & Custom Sorting:** The AI implemented basic `?done=` and `?search=` filters, but omitted pagination (`?limit=`, `?offset=`) and title sorting (`?sort=title`) from the original implementation.
+- **Port Default:** Defaulted to port `4000` rather than the primary application port `3000`.
+
+### 3. What the Prompt Forgot to Specify & What the AI Decided
+- **Search Query Case-Insensitivity:** The prompt did not specify case handling for searches; the AI decided to use `LOWER(title) LIKE ?` with lowercase bindings to guarantee cross-platform case-insensitive search.
+- **Timestamp Return Structure:** The prompt did not specify whether timestamps should be ISO 8601 strings or raw SQLite datetime strings; the AI decided to pass SQLite's default format directly.
+
+### Rematch Conclusion
+Building the SQLite persistence layer by hand first gave the exact understanding needed to evaluate the AI's parameter bindings, transaction handling, and identify missing query filters. Quality code review requires knowing the implementation details beforehand.
 
 ### Direct SQL Execution
 
