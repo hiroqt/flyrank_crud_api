@@ -227,3 +227,19 @@ Writing the solution by hand in Stages 0–6 provided the exact mental model nee
   4
   ```
 - **Result:** Returned the total number of tasks currently in `tasks.db`, demonstrating that direct SQL queries and the running API interact with the exact same database file in real-time.
+
+
+## Database Architecture (SQLite)
+
+### 1. Why SQLite?
+- **Single File:** The entire database lives in a single local file (`tasks.db`), avoiding complex database server configurations.
+- **Zero Setup:** No external database servers (PostgreSQL/MySQL), daemon processes, or credentials required to run.
+- **Persistence:** Unlike in-memory arrays, all mutations survive crashes and restarts automatically.
+
+### 2. Database File Location & Auto-Initialization
+- **Path:** `./tasks.db` (root directory, `.gitignore`'d so every clean clone starts fresh).
+- **Auto-Provisioning:** On server boot (`npm start`), the table `tasks` is created with `CREATE TABLE IF NOT EXISTS`, and if empty (`COUNT(*) === 0`), 3 initial example tasks are automatically seeded.
+
+### 3. One-Command Quickstart
+```bash
+npm start
