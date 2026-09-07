@@ -375,45 +375,52 @@ app.get('/tasks/:id', (req, res) => {
  */
 app.put('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT id, title, done FROM tasks WHERE id = ?').get(id);
 
+  //1.Fetch existing task if ID exist
+  const existing = db.prepare(
+    'SElECT id, title, done FROM tasks WHERE id = ?'
+  ).get(id);
   if (!existing) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
+  //2. Validation of request body
   const { title, done } = req.body ?? {};
-  const hasTitle = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'title');
-  const hasDone = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'done');
-
+  const hasTitle =
+    Object.prototype.hasOwnProperty.call(req.body ?? {},
+      'title'
+    )
+  const hasDone =
+    Object.prototype.hasOwnProperty.call(req.body ?? {},
+      'done'
+    )
   if (!hasTitle && !hasDone) {
     return res.status(400).json({ error: 'request body must include title and/or done' });
   }
-
   let newTitle = existing.title;
   let newDone = existing.done;
-
   if (hasTitle) {
     if (title === null || String(title).trim() === '') {
       return res.status(400).json({ error: 'title cannot be empty' });
     }
     newTitle = String(title).trim();
   }
-
   if (hasDone) {
     if (typeof done !== 'boolean') {
       return res.status(400).json({ error: 'done must be a boolean' });
     }
     newDone = done ? 1 : 0;
   }
-
+  // 3. Run parameterized UPDATE query
   db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(newTitle, newDone, id);
-
+  // 4. Return updated task with done as boolean
   res.json({
     id,
     title: newTitle,
     done: Boolean(newDone),
   });
 });
+
 
 /**
  * @openapi
@@ -434,14 +441,19 @@ app.put('/tasks/:id', (req, res) => {
  */
 app.delete('/tasks/:id', (req, res) => {
   const id = Number(req.params.id);
+
+  // 1. Run parameterized DELETE query
   const info = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
 
+  // 2. info.changes indicates how many rows were deleted. If 0, the task was not found.
   if (info.changes === 0) {
     return res.status(404).json({ error: `Task ${id} not found` });
   }
 
+  // 3. Return 204 No Content with empty body
   res.status(204).send();
 });
+
 
 app.listen(port, () => {
   console.log(`CRUD API listening on port ${port}`);
