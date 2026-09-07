@@ -282,19 +282,27 @@ app.post('/reset', (req, res) => {
 app.post('/tasks', (req, res) => {
   const { title } = req.body ?? {};
 
-  if (title === undefined || title === null || String(title).trim() === '') {
-    return res.status(400).json({ error: 'title is required and cannot be empty' });
+  //1. Validation
+  if (title === undefined || title === null
+    || String(title).trim() === "") {
+    return res.status(400).json({ error: "Missing or empty title" });
   }
-
   const cleanTitle = String(title).trim();
-  const info = db.prepare('INSERT INTO tasks (title, done) VALUES (?, 0)').run(cleanTitle);
-  const task = {
-    id: Number(info.lastInsertRowid),
+
+  //2. Insert into SQLite with parametreized query
+  const stmt = db.prepare(
+    'INSERT INTO tasks (title, done) VALUES (?, ?)'
+  );
+  const info = stmt.run(cleanTitle, 0);
+
+  //3. Return created task + 201 Created
+  const newTask = {
+    id: info.lastInsertRowid,
     title: cleanTitle,
     done: false,
   };
-
-  res.status(201).json(task);
+  //4. Return 201 with new tasks
+  res.status(201).json(newTask);
 });
 
 /**
