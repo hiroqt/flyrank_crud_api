@@ -1,45 +1,48 @@
+require('dotenv').config();
 const express = require('express');
+const { Pool } = require('pg');
 const swaggerUi = require('swagger-ui-express');
-const Database = require('better-sqlite3');
 const openapi = require('../openapi.json');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Middleware
 app.use(express.json());
 
-// SQLite Database Setup
-const db = new Database('tasks.db');
+// Database Connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgres://postgres:dev@localhost:5432/tasks',
+});
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+// Database Initialization & Seed
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
-// Seed 3 example tasks only if the table is empty
-const countResult = db.prepare('SELECT COUNT(*) AS count FROM tasks').get();
-if (countResult.count === 0) {
-  const seedStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
-  const seedTasks = [
-    ['Buy groceries', 0],
-    ['Walk the dog', 1],
-    ['Read a book', 0],
-  ];
-  const seedTransaction = db.transaction((tasks) => {
-    for (const [title, done] of tasks) {
-      seedStmt.run(title, done);
+  const { rows } = await pool.query('SELECT COUNT(*) FROM tasks');
+  if (parseInt(rows[0].count, 10) === 0) {
+    const seedTasks = [
+      ['Buy groceries', false],
+      ['Walk the dog', true],
+      ['Read a book', false],
+    ];
+    for (const [title, done] of seedTasks) {
+      await pool.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', [title, done]);
     }
-  });
-  seedTransaction(seedTasks);
+    console.log('[AI Version] Seeded 3 initial tasks.');
+  }
 }
 
-// Helper to format SQLite rows for JSON responses
+initDB().catch(console.error);
+
+// Format helper
 const formatTask = (row) => ({
   id: row.id,
   title: row.title,
@@ -48,131 +51,126 @@ const formatTask = (row) => ({
   updated_at: row.updated_at,
 });
 
-// Interactive OpenAPI Documentation
+// Swagger UI Docs
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapi));
 
-// Root & Health
+// GET / - API Info
 app.get('/', (req, res) => {
   res.status(200).json({
-    name: 'Task API',
+    name: 'Task API (AI Edition)',
     version: '1.0',
     endpoints: ['/tasks', '/stats', '/reset', '/docs'],
   });
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
-// GET /tasks with optional filters
-app.get('/tasks', (req, res) => {
-  let query = 'SELECT * FROM tasks WHERE 1=1';
-  const params = [];
-
-  const { done, search } = req.query;
-
-  if (done !== undefined) {
-    if (done !== 'true' && done !== 'false') {
-      return res.status(400).json({ error: 'done query parameter must be "true" or "false"' });
-    }
-    query += ' AND done = ?';
-    params.push(done === 'true' ? 1 : 0);
-  }
-
-  if (search !== undefined) {
-    const term = String(search).trim();
-    if (!term) {
-      return res.status(400).json({ error: 'search query parameter must not be empty' });
-    }
-    query += ' AND LOWER(title) LIKE ?';
-    params.push(`%${term.toLowerCase()}%`);
-  }
-
-  query += ' ORDER BY id ASC';
-
-  const rows = db.prepare(query).all(...params);
-  res.status(200).json(rows.map(formatTask));
-});
-
-// GET /stats
-app.get('/stats', (req, res) => {
-  const stats = db.prepare(`
-    SELECT
-      COUNT(*) AS total,
-      COALESCE(SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END), 0) AS done,
-      COALESCE(SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END), 0) AS open
-    FROM tasks
-  `).get();
-
-  res.status(200).json({
-    total: stats.total,
-    done: stats.done,
-    open: stats.open,
-  });
-});
-
-// POST /reset
-app.post('/reset', (req, res) => {
-  db.exec('DELETE FROM tasks');
+// GET /health - Healthcheck
+app.get('/health', async (req, res) => {
   try {
-    db.exec("DELETE FROM sqlite_sequence WHERE name = 'tasks'");
-  } catch (e) {}
-
-  const seedStmt = db.prepare('INSERT INTO tasks (id, title, done) VALUES (?, ?, ?)');
-  const seedTasks = [
-    [1, 'Buy groceries', 0],
-    [2, 'Walk the dog', 1],
-    [3, 'Read a book', 0],
-  ];
-  for (const [id, title, done] of seedTasks) {
-    seedStmt.run(id, title, done);
+    await pool.query('SELECT 1');
+    res.status(200).json({ status: 'ok', database: 'connected' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', database: 'disconnected' });
   }
-
-  const rows = db.prepare('SELECT * FROM tasks ORDER BY id ASC').all();
-  res.status(200).json(rows.map(formatTask));
 });
 
-// POST /tasks
-app.post('/tasks', (req, res) => {
+// GET /tasks - List with pagination, search, done filter
+app.get('/tasks', async (req, res) => {
+  try {
+    let query = 'SELECT * FROM tasks WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (req.query.done !== undefined) {
+      if (req.query.done !== 'true' && req.query.done !== 'false') {
+        return res.status(400).json({ error: 'done must be true or false' });
+      }
+      query += ` AND done = $${idx++}`;
+      params.push(req.query.done === 'true');
+    }
+
+    if (req.query.search !== undefined) {
+      const search = String(req.query.search).trim();
+      if (!search) {
+        return res.status(400).json({ error: 'search must not be empty' });
+      }
+      query += ` AND title ILIKE $${idx++}`;
+      params.push(`%${search}%`);
+    }
+
+    if (req.query.sort === 'title') {
+      query += ' ORDER BY LOWER(title) ASC';
+    } else {
+      query += ' ORDER BY id ASC';
+    }
+
+    if (req.query.limit !== undefined) {
+      const limit = parseInt(req.query.limit, 10);
+      if (isNaN(limit) || limit <= 0) {
+        return res.status(400).json({ error: 'limit must be a positive integer' });
+      }
+      const offset = req.query.offset ? parseInt(req.query.offset, 10) : 0;
+      if (isNaN(offset) || offset < 0) {
+        return res.status(400).json({ error: 'offset must be a non-negative integer' });
+      }
+      query += ` LIMIT $${idx++} OFFSET $${idx++}`;
+      params.push(limit, offset);
+    } else if (req.query.offset !== undefined) {
+      const offset = parseInt(req.query.offset, 10);
+      if (isNaN(offset) || offset < 0) {
+        return res.status(400).json({ error: 'offset must be a non-negative integer' });
+      }
+      query += ` OFFSET $${idx++}`;
+      params.push(offset);
+    }
+
+    const { rows } = await pool.query(query, params);
+    res.status(200).json(rows.map(formatTask));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /tasks - Create task
+app.post('/tasks', async (req, res) => {
   const { title } = req.body || {};
-
-  if (!title || typeof title !== 'string' || title.trim() === '') {
-    return res.status(400).json({ error: 'title is required and must be a non-empty string' });
+  if (!title || typeof title !== 'string' || !title.trim()) {
+    return res.status(400).json({ error: 'Missing or empty title' });
   }
 
-  const cleanTitle = title.trim();
-  const insertStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, 0)');
-  const result = insertStmt.run(cleanTitle);
-
-  const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(formatTask(newTask));
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO tasks (title, done) VALUES ($1, FALSE) RETURNING *',
+      [title.trim()]
+    );
+    res.status(201).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// GET /tasks/:id
-app.get('/tasks/:id', (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ error: 'Task ID must be a positive integer' });
+// GET /tasks/:id - Get by ID
+app.get('/tasks/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!row) {
-    return res.status(404).json({ error: `Task ${id} not found` });
+  try {
+    const { rows } = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.status(200).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.status(200).json(formatTask(row));
 });
 
-// PUT /tasks/:id
-app.put('/tasks/:id', (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ error: 'Task ID must be a positive integer' });
-  }
-
-  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!existing) {
-    return res.status(404).json({ error: `Task ${id} not found` });
+// PUT /tasks/:id - Update task
+app.put('/tasks/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid task ID' });
   }
 
   const { title, done } = req.body || {};
@@ -180,51 +178,99 @@ app.put('/tasks/:id', (req, res) => {
   const hasDone = Object.prototype.hasOwnProperty.call(req.body || {}, 'done');
 
   if (!hasTitle && !hasDone) {
-    return res.status(400).json({ error: 'request body must include title and/or done' });
+    return res.status(400).json({ error: 'Body must include title and/or done' });
   }
 
-  let newTitle = existing.title;
-  let newDone = existing.done;
-
-  if (hasTitle) {
-    if (!title || typeof title !== 'string' || title.trim() === '') {
-      return res.status(400).json({ error: 'title cannot be empty' });
+  try {
+    const existing = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
     }
-    newTitle = title.trim();
-  }
 
-  if (hasDone) {
-    if (typeof done !== 'boolean') {
-      return res.status(400).json({ error: 'done must be a boolean' });
+    let nextTitle = existing.rows[0].title;
+    let nextDone = existing.rows[0].done;
+
+    if (hasTitle) {
+      if (typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({ error: 'title cannot be empty' });
+      }
+      nextTitle = title.trim();
     }
-    newDone = done ? 1 : 0;
+
+    if (hasDone) {
+      if (typeof done !== 'boolean') {
+        return res.status(400).json({ error: 'done must be a boolean' });
+      }
+      nextDone = done;
+    }
+
+    const { rows } = await pool.query(
+      'UPDATE tasks SET title = $1, done = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
+      [nextTitle, nextDone, id]
+    );
+
+    res.status(200).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  db.prepare('UPDATE tasks SET title = ?, done = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newTitle, newDone, id);
-
-  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  res.status(200).json(formatTask(updated));
 });
 
-// DELETE /tasks/:id
-app.delete('/tasks/:id', (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ error: 'Task ID must be a positive integer' });
+// DELETE /tasks/:id - Delete task
+app.delete('/tasks/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-  if (result.changes === 0) {
-    return res.status(404).json({ error: `Task ${id} not found` });
+  try {
+    const { rowCount } = await pool.query('DELETE FROM tasks WHERE id = $1 RETURNING id', [id]);
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.status(204).send();
 });
 
-// Start Server
+// GET /stats - Derived metrics
+app.get('/stats', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COALESCE(SUM(CASE WHEN done = TRUE THEN 1 ELSE 0 END), 0)::int AS done,
+        COALESCE(SUM(CASE WHEN done = FALSE THEN 1 ELSE 0 END), 0)::int AS open
+      FROM tasks
+    `);
+    res.status(200).json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /reset - Restore seed
+app.post('/reset', async (req, res) => {
+  try {
+    await pool.query('TRUNCATE tasks RESTART IDENTITY');
+    const seedTasks = [
+      ['Buy groceries', false],
+      ['Walk the dog', true],
+      ['Read a book', false],
+    ];
+    for (const [title, done] of seedTasks) {
+      await pool.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', [title, done]);
+    }
+    const { rows } = await pool.query('SELECT * FROM tasks ORDER BY id ASC');
+    res.status(200).json(rows.map(formatTask));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`AI-Version Task API running on port ${PORT}`);
+    console.log(`[AI Version] Server listening on port ${PORT}`);
   });
 }
 
