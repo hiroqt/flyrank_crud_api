@@ -190,3 +190,40 @@ I am reviewing the previous AI-generated backend implementation against my requi
 ### Rematch Conclusion
 Writing the solution by hand in Stages 0–6 provided the exact mental model needed to rigorously review AI-generated code, spot missing edge-case validations, and enforce strict REST status code contracts.
 
+### Direct SQL Execution
+
+#### 1. List all tasks
+- **Query:**
+  ```sql
+  SELECT * FROM tasks;
+  ```
+- **Output:**
+  ```text
+  1|Buy groceries|0
+  2|Walk the dog|1
+  3|Read a book|0
+  5|Buy milk|0
+  ```
+- **Result:** Returned all active rows stored directly in `tasks.db`.
+
+#### 2. Filter completed tasks
+- **Query:**
+  ```sql
+  SELECT * FROM tasks WHERE done = 1;
+  ```
+- **Output:**
+  ```text
+  2|Walk the dog|1
+  ```
+- **Result:** Filtered and returned only tasks with `done = 1` (completed).
+
+#### 3. Count total tasks
+- **Query:**
+  ```sql
+  SELECT COUNT(*) FROM tasks;
+  ```
+- **Output:**
+  ```text
+  4
+  ```
+- **Result:** Returned the total number of tasks currently in `tasks.db`, demonstrating that direct SQL queries and the running API interact with the exact same database file in real-time.
