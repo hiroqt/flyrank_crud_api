@@ -226,7 +226,7 @@ app.get('/tasks', async (req, res) => {
       params.push(done);
     }
 
-    // SQL LIKE / ILIKE search
+    // SQL ILIKE search
     if (req.query.search !== undefined) {
       const word = String(req.query.search).trim();
       if (word === '') {
@@ -236,14 +236,14 @@ app.get('/tasks', async (req, res) => {
       params.push(`%${word}%`);
     }
 
-    // Sort alphabetically or by id
+    // Sort
     if (req.query.sort === 'title') {
       query += ' ORDER BY LOWER(title) ASC';
     } else {
       query += ' ORDER BY id ASC';
     }
 
-    // Pagination: limit and offset
+    // Pagination
     if (req.query.limit !== undefined) {
       const limit = Number(req.query.limit);
       if (!Number.isInteger(limit) || limit <= 0) {
@@ -270,6 +270,7 @@ app.get('/tasks', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 /**
  * @openapi
@@ -403,6 +404,7 @@ app.get('/tasks/:id', async (req, res) => {
   }
 
   try {
+    // Parameterized query placeholder ($1)
     const result = await pool.query(
       'SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = $1',
       [id]
@@ -417,6 +419,7 @@ app.get('/tasks/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 /**
  * @openapi
