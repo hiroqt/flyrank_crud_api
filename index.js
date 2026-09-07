@@ -356,7 +356,7 @@ app.post('/reset', async (req, res) => {
 app.post('/tasks', async (req, res) => {
   const { title } = req.body ?? {};
 
-  // 1. Validation
+  // 1. Validation (400 if missing or empty)
   if (title === undefined || title === null || String(title).trim() === '') {
     return res.status(400).json({ error: 'Missing or empty title' });
   }
@@ -457,7 +457,7 @@ app.put('/tasks/:id', async (req, res) => {
   }
 
   try {
-    // 1. Fetch existing task if ID exists
+    // 1. Fetch existing task
     const existingResult = await pool.query(
       'SELECT id, title, done, created_at, updated_at FROM tasks WHERE id = $1',
       [id]
@@ -468,7 +468,7 @@ app.put('/tasks/:id', async (req, res) => {
     }
     const existing = existingResult.rows[0];
 
-    // 2. Validation of request body
+    // 2. Validation
     const { title, done } = req.body ?? {};
     const hasTitle = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'title');
     const hasDone = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'done');
@@ -494,13 +494,12 @@ app.put('/tasks/:id', async (req, res) => {
       newDone = done;
     }
 
-    // 3. Run parameterized UPDATE query with updated_at timestamp
+    // 3. Update query in Postgres
     const updateResult = await pool.query(
       'UPDATE tasks SET title = $1, done = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING id, title, done, created_at, updated_at',
       [newTitle, newDone, id]
     );
 
-    // 4. Return updated task
     res.json(formatTask(updateResult.rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -532,15 +531,13 @@ app.delete('/tasks/:id', async (req, res) => {
   }
 
   try {
-    // 1. Run parameterized DELETE query
     const result = await pool.query('DELETE FROM tasks WHERE id = $1 RETURNING id', [id]);
 
-    // 2. If rowCount is 0, task was not found
     if (result.rowCount === 0) {
       return res.status(404).json({ error: `Task ${id} not found` });
     }
 
-    // 3. Return 204 No Content
+    // 204 No Content with empty body
     res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
