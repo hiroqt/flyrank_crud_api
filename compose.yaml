@@ -1,4 +1,5 @@
 services:
+  # Main Node.js Task API service
   api:
     build: .
     ports:
@@ -6,9 +7,13 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgres://postgres:dev@db:5432/tasks
+      # Connect to Redis using the compose service name 'redis'
+      REDIS_URL: redis://redis:6379
     depends_on:
       - db
+      - redis
 
+  # PostgreSQL Database service
   db:
     image: postgres
     environment:
@@ -17,7 +22,15 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Named volume to persist database rows across restarts
       - taskdata:/var/lib/postgresql
 
+  # Optional extra: Redis in-memory cache/store service
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
 volumes:
+  # Persistent volume for PostgreSQL data
   taskdata:

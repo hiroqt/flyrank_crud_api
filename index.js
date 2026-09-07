@@ -3,6 +3,8 @@ const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 const { Pool } = require('pg');
+// Optional extra: Redis driver for caching / session storage
+const Redis = require('ioredis');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,6 +16,23 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+
+// Redis client initialization (if REDIS_URL is provided in environment)
+let redis = null;
+if (process.env.REDIS_URL) {
+  redis = new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: 3,
+  });
+
+  // PING Redis once on startup to verify connectivity
+  redis.ping()
+    .then((pong) => {
+      console.log(`[Redis] Connection verified on startup: ${pong}`);
+    })
+    .catch((err) => {
+      console.error('[Redis] Connection failed on startup:', err.message);
+    });
+}
 
 // Original demo data used for initial seed and POST /reset
 const SEED_TASKS = [
