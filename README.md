@@ -15,7 +15,26 @@ npm install
 npm run dev
 ```
 
+# 1. Clone the repository
+git clone https://github.com/hiroqt/flyrank_crud_api.git
+cd flyrank_crud_api
+
+# 2. Copy environment template
+cp .env.example .env
+
+# 3. Start the entire stack with Docker Compose
+docker compose up --build
+```
+
 The server will start at **`http://localhost:3000`**.
+
+---
+
+## 📸 Database Verification (PostgreSQL in Docker)
+
+Verification of PostgreSQL running in Docker with tables and rows:
+
+![PostgreSQL Database Screenshot](./db_screenshot.png)
 
 ---
 
@@ -282,3 +301,12 @@ npm start
 
 ### 5. Why Database Migrations Exist (Reflection)
 > Adding new columns (`created_at`, `updated_at`) to an existing database required either altering the schema or deleting `tasks.db` to let it recreate. In production systems with real user data, deleting the database file is impossible without losing data — which is why database migrations exist to safely evolve schemas over time without disruption.
+
+
+# 🚀 Task CRUD API (Containerized with Docker & PostgreSQL)
+
+A clean, production-ready RESTful CRUD API built with **Node.js**, **Express**, and **PostgreSQL**, fully containerized and orchestrated with **Docker Compose**. Features interactive **Swagger UI** documentation, input validation, search, filtering, and stats computing.
+
+---
+
+
