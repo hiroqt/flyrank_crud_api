@@ -48,7 +48,40 @@ Interactive OpenAPI 3.0 documentation is available right out of the box. You can
 
 ## 🔐 Authentication (Supabase)
 
-Auth is handled by Supabase. Set `SUPABASE_URL` and `SUPABASE_KEY` in `.env`.
+Auth is handled by Supabase.
+
+### Setup (under 5 minutes)
+
+1. Create a free project at [supabase.com](https://supabase.com/dashboard). Copy your **Project URL** and **anon public key** from *Project Settings → API*.
+2. In *Authentication → Sign In / Providers → Email*, turn **Confirm email** off (practice project only; keep it on in production).
+3. Clone and configure:
+
+   ```bash
+   git clone https://github.com/hiroqt/flyrank_crud_api.git
+   cd flyrank_crud_api
+   cp .env.example .env
+   ```
+
+4. Edit `.env` and fill in your own values:
+
+   | Variable | Description |
+   |---|---|
+   | `PORT` | Port to listen on (default `3000`) |
+   | `SUPABASE_URL` | Your Supabase project URL |
+   | `SUPABASE_KEY` | Your Supabase anon public key |
+
+   > ⚠️ `.env` is git-ignored. Never commit your keys.
+
+5. Install and run:
+
+   ```bash
+   npm install && npm start
+   ```
+
+   Then open **http://localhost:3000/docs** (if port 3000 is busy, the server prints the fallback port it picked).
+
+
+### API Reference
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
