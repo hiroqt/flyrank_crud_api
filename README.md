@@ -87,6 +87,7 @@ Auth is handled by Supabase.
 |---|---|---|---|
 | POST | `/auth/signup` | No | Register with `email` + `password` (201) |
 | POST | `/auth/login` | No | Returns `access_token` + `refresh_token` (200) |
+| POST | `/auth/refresh` | No | Swap a `refresh_token` for a new `access_token` (200) |
 | POST | `/auth/logout` | Bearer | Signs the user out (204) |
 | GET | `/public/info` | No | Public message (200) |
 | GET | `/protected/profile` | Bearer | Verified user's `id`, `email`, `created_at` |

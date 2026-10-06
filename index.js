@@ -675,6 +675,48 @@ app.post('/auth/login', async (req, res) => {
 
 /**
  * @openapi
+ * /auth/refresh:
+ *   post:
+ *     summary: Exchange a refresh token for a new access token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refresh_token]
+ *             properties:
+ *               refresh_token: { type: string }
+ *     responses:
+ *       200:
+ *         description: New access_token and refresh_token
+ *       400:
+ *         description: Missing refresh_token
+ *       401:
+ *         description: Invalid or expired refresh token
+ */
+// POST /auth/refresh - get a fresh access token without logging in again
+app.post('/auth/refresh', async (req, res) => {
+  const { refresh_token } = req.body || {};
+  if (!refresh_token) {
+    return res.status(400).json({ error: 'refresh_token is required' });
+  }
+
+  const { data, error } = await supabase.auth.refreshSession({ refresh_token });
+  if (error) {
+    if (error.name === 'AuthApiError') {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+    return res.status(502).json({ error: error.message });
+  }
+  res.status(200).json({
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+  });
+});
+
+/**
+ * @openapi
  * /public/info:
  *   get:
  *     summary: Public info (no auth)
