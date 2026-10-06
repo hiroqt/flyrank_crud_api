@@ -46,6 +46,25 @@ Interactive OpenAPI 3.0 documentation is available right out of the box. You can
 
 ---
 
+## 🔐 Authentication (Supabase)
+
+Auth is handled by Supabase. Set `SUPABASE_URL` and `SUPABASE_KEY` in `.env`.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/auth/signup` | No | Register with `email` + `password` (201) |
+| POST | `/auth/login` | No | Returns `access_token` + `refresh_token` (200) |
+| POST | `/auth/logout` | Bearer | Signs the user out (204) |
+| GET | `/public/info` | No | Public message (200) |
+| GET | `/protected/profile` | Bearer | Verified user's `id`, `email`, `created_at` |
+| GET | `/protected/dashboard` | Bearer | Welcome message for the verified user |
+
+Protected routes share one `requireAuth` middleware that verifies the token with `supabase.auth.getUser()`. In Swagger UI, click **Authorize**, paste the `access_token`, and use **Try it out**:
+
+![Swagger UI calling GET /protected/profile with a Bearer token](./swagger_screenshot.png)
+
+---
+
 ##  Endpoints Summary
 
 | Method | Endpoint | Description | Request Body | Success Status | Error Statuses |

@@ -117,11 +117,19 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: `http://localhost:${port}`,
-        description: 'Local development server',
+        // Relative URL: "Try it out" calls whichever host:port serves /docs
+        url: '/',
+        description: 'Current server',
       },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
         Task: {
           type: 'object',
@@ -587,6 +595,27 @@ app.delete('/tasks/:id', async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/signup:
+ *   post:
+ *     summary: Register a new user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, example: test@example.com }
+ *               password: { type: string, example: password123 }
+ *     responses:
+ *       201:
+ *         description: User created
+ *       400:
+ *         description: Missing email or password
+ */
 // POST /auth/signup - register a new user via Supabase Auth
 app.post('/auth/signup', async (req, res) => {
   const { email, password } = req.body || {};
@@ -601,6 +630,29 @@ app.post('/auth/signup', async (req, res) => {
   res.status(201).json(data.user);
 });
 
+/**
+ * @openapi
+ * /auth/login:
+ *   post:
+ *     summary: Log in and get access + refresh tokens
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, example: test@example.com }
+ *               password: { type: string, example: password123 }
+ *     responses:
+ *       200:
+ *         description: access_token and refresh_token
+ *       400:
+ *         description: Missing email or password
+ *       401:
+ *         description: Invalid login credentials
+ */
 // POST /auth/login - sign in and return JWT + refresh token
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
@@ -621,6 +673,15 @@ app.post('/auth/login', async (req, res) => {
   });
 });
 
+/**
+ * @openapi
+ * /public/info:
+ *   get:
+ *     summary: Public info (no auth)
+ *     responses:
+ *       200:
+ *         description: Public welcome message
+ */
 // GET /public/info - no auth required
 app.get('/public/info', (req, res) => {
   res.status(200).json({ message: 'Welcome stranger! This info is public.' });
@@ -643,17 +704,56 @@ async function requireAuth(req, res, next) {
   next();
 }
 
+/**
+ * @openapi
+ * /protected/profile:
+ *   get:
+ *     summary: Get the logged-in user's profile
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: id, email and created_at
+ *       401:
+ *         description: Missing, invalid or expired token
+ */
 // GET /protected/profile - requires valid token via requireAuth guard
 app.get('/protected/profile', requireAuth, (req, res) => {
   const { id, email, created_at } = req.user;
   res.status(200).json({ id, email, created_at });
 });
 
+/**
+ * @openapi
+ * /protected/dashboard:
+ *   get:
+ *     summary: Protected dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Dashboard welcome message
+ *       401:
+ *         description: Missing, invalid or expired token
+ */
 // GET /protected/dashboard - second protected route demonstrating middleware reuse
 app.get('/protected/dashboard', requireAuth, (req, res) => {
   res.status(200).json({ message: `Welcome to the dashboard, ${req.user.email}!` });
 });
 
+/**
+ * @openapi
+ * /auth/logout:
+ *   post:
+ *     summary: Log out
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       204:
+ *         description: Logged out
+ *       401:
+ *         description: Missing, invalid or expired token
+ */
 // POST /auth/logout - sign out user and invalidate session
 app.post('/auth/logout', requireAuth, async (req, res) => {
   const { error } = await supabase.auth.signOut();
