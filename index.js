@@ -5,9 +5,22 @@ const swaggerJsdoc = require('swagger-jsdoc');
 const { Pool } = require('pg');
 // Optional extra: Redis driver for caching / session storage
 const Redis = require('ioredis');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Initialize Supabase Client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+let supabase = null;
+
+if (supabaseUrl && supabaseKey) {
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('[Supabase] Client initialized successfully.');
+} else {
+  console.warn('[Supabase] Warning: SUPABASE_URL or SUPABASE_KEY missing in environment variables.');
+}
 
 // Parse JSON request bodies (e.g. POST /tasks).
 app.use(express.json());
@@ -16,12 +29,23 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+pool.on('error', (err) => {
+  console.error('[PostgreSQL] Client error:', err.message);
+});
 
 // Redis client initialization (if REDIS_URL is provided in environment)
 let redis = null;
 if (process.env.REDIS_URL) {
   redis = new Redis(process.env.REDIS_URL, {
     maxRetriesPerRequest: 3,
+    retryStrategy(times) {
+      if (times > 3) return null;
+      return Math.min(times * 200, 2000);
+    },
+  });
+
+  redis.on('error', (err) => {
+    // Suppress unhandled event crashes when Redis server is offline
   });
 
   // PING Redis once on startup to verify connectivity
@@ -563,6 +587,20 @@ app.delete('/tasks/:id', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`CRUD API listening on port ${port}`);
-});
+function startServer(targetPort) {
+  const server = app.listen(targetPort, () => {
+    console.log(`CRUD API listening on port ${targetPort}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      const fallbackPort = Number(targetPort) + 1;
+      console.warn(`[Server] Port ${targetPort} is in use. Switching to port ${fallbackPort}...`);
+      startServer(fallbackPort);
+    } else {
+      console.error('[Server] Fatal server error:', err.message);
+    }
+  });
+}
+
+startServer(port);
