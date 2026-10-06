@@ -626,22 +626,41 @@ app.get('/public/info', (req, res) => {
   res.status(200).json({ message: 'Welcome stranger! This info is public.' });
 });
 
-// GET /protected/profile - requires "Authorization: Bearer <token>"
-app.get('/protected/profile', async (req, res) => {
+// Auth Middleware Guard
+async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
   if (scheme !== 'Bearer' || !token) {
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  // Ask Supabase whether the token is real (network call)
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  const { id, email, created_at } = data.user;
+  req.user = data.user;
+  next();
+}
+
+// GET /protected/profile - requires valid token via requireAuth guard
+app.get('/protected/profile', requireAuth, (req, res) => {
+  const { id, email, created_at } = req.user;
   res.status(200).json({ id, email, created_at });
+});
+
+// GET /protected/dashboard - second protected route demonstrating middleware reuse
+app.get('/protected/dashboard', requireAuth, (req, res) => {
+  res.status(200).json({ message: `Welcome to the dashboard, ${req.user.email}!` });
+});
+
+// POST /auth/logout - sign out user and invalidate session
+app.post('/auth/logout', requireAuth, async (req, res) => {
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  res.status(204).send();
 });
 
 function startServer(targetPort) {
