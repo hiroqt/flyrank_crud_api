@@ -618,6 +618,22 @@ app.post('/auth/login', async (req, res) => {
   });
 });
 
+// GET /public/info - no auth required
+app.get('/public/info', (req, res) => {
+  res.status(200).json({ message: 'Welcome stranger! This info is public.' });
+});
+
+// GET /protected/profile - requires "Authorization: Bearer <token>"
+app.get('/protected/profile', (req, res) => {
+  const header = req.headers.authorization || '';
+  const [scheme, token] = header.split(' ');
+  if (scheme !== 'Bearer' || !token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+  // Token is not verified yet - only checking that one was presented.
+  res.status(200).json({ message: 'Token received' });
+});
+
 function startServer(targetPort) {
   const server = app.listen(targetPort, () => {
     console.log(`CRUD API listening on port ${targetPort}`);
