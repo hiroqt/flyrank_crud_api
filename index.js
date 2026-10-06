@@ -610,7 +610,10 @@ app.post('/auth/login', async (req, res) => {
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    return res.status(401).json({ error: 'Invalid login credentials' });
+    if (error.name === 'AuthApiError') {
+      return res.status(401).json({ error: 'Invalid login credentials' });
+    }
+    return res.status(502).json({ error: error.message });
   }
   res.status(200).json({
     access_token: data.session.access_token,
@@ -624,14 +627,21 @@ app.get('/public/info', (req, res) => {
 });
 
 // GET /protected/profile - requires "Authorization: Bearer <token>"
-app.get('/protected/profile', (req, res) => {
+app.get('/protected/profile', async (req, res) => {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
   if (scheme !== 'Bearer' || !token) {
     return res.status(401).json({ error: 'Access token required' });
   }
-  // Token is not verified yet - only checking that one was presented.
-  res.status(200).json({ message: 'Token received' });
+
+  // Ask Supabase whether the token is real (network call)
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  const { id, email, created_at } = data.user;
+  res.status(200).json({ id, email, created_at });
 });
 
 function startServer(targetPort) {
