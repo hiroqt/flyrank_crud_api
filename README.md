@@ -383,5 +383,45 @@ Provide a Dockerfile and compose.yaml orchestrating the app (api) and postgres (
 ### Rematch Conclusion
 Building the containerized PostgreSQL stack by hand across Stages 0–5 provided the necessary experience to quickly spot Docker Compose service networking rules, volume mount requirements, and environment isolation. AI serves as a powerful accelerator when guided by hands-on engineering fundamentals.
 
+---
+
+## 🤖 AI vs Me (Rematch — Secured Auth API with Supabase)
+
+### Prompt Used
+```text
+Build a secured REST API using Node.js and Express with Supabase as the Identity Provider.
+Load SUPABASE_URL and SUPABASE_KEY from environment variables using dotenv and initialize the Supabase JS client.
+Implement the following routes:
+1. POST /auth/signup: takes email and password in JSON body, validates non-empty (400 if missing), registers via supabase.auth.signUp, and returns 201 with user object.
+2. POST /auth/login: takes email and password in JSON body, validates non-empty (400 if missing), authenticates via supabase.auth.signInWithPassword, and returns 200 with access_token and refresh_token, or 401 if invalid.
+3. POST /auth/logout: protected route that calls supabase.auth.signOut and returns 204.
+4. GET /public/info: public route returning 200 with a welcome message.
+5. GET /protected/profile: protected route returning 200 with the authenticated user's id, email, and created_at.
+Create a reusable authentication middleware that checks the Authorization header for "Bearer <token>", verifies the token with supabase.auth.getUser(token), rejects with 401 if missing, malformed, or invalid, and attaches the user to req.user for protected routes.
+Configure Swagger UI documentation at /docs with HTTP Bearer JWT security scheme so protected endpoints show padlock icons and can be tested interactively.
+Run the server on PORT (default 4000 to avoid port conflicts).
+```
+
+### 1. How it handled token extraction (Bearer prefix parsing)
+- **Me (Hand-Crafted):** Strictly enforces standard RFC 6750 format (`const [scheme, token] = header.split(' '); if (scheme !== 'Bearer' || !token) return 401`). Any request sending a naked token (`Authorization: <token>`) or invalid scheme is immediately rejected with `401 Access token required`.
+- **AI Version:** Used a lenient fallback (`parts.length === 2 ? parts[1] : parts[0]`). While it handled standard Bearer headers, it allowed naked tokens without the `Bearer` scheme to slip right through into `getUser()`, violating standard header specifications.
+
+### 2. Security flaws and edge cases introduced
+- **Session Pollution in Node Singleton:** The AI initialized a global Supabase client singleton without disabling session persistence (`auth: { persistSession: false }`). When multiple clients log in concurrently, `signInWithPassword` mutates the client's internal memory state, potentially sharing session context across users on a multi-tenant backend server.
+- **Error Obfuscation:** The AI collapsed all signup/login failures into generic `401` or `400` errors, concealing upstream Supabase network timeouts or 502 Bad Gateway outages.
+- **Missing Port Fallback:** The AI hardcoded `app.listen(PORT)`, which immediately crashes on `EADDRINUSE` if another process holds the port. Our hand-crafted version gracefully detected collision and advanced to the next available port.
+
+### 3. What the prompt forgot to specify & what the AI silently decided
+- **Token Refresh Endpoint:** The prompt only asked for the 5 core endpoints. The AI silently omitted `POST /auth/refresh`, leaving clients unable to rotate tokens when access tokens expire.
+- **Dotenv Path Hierarchy:** The prompt did not specify where the `.env` file lived relative to the quarantine subfolder. The AI initially assumed `./.env` in its local directory and threw `supabaseUrl is required` until configured with `path.resolve(__dirname, '../.env')`.
+- **Swagger Integration Style:** The prompt asked for Swagger UI; the AI decided to generate a static standalone `swaggerDocument` object rather than integrating JSDoc annotations into the existing codebase.
+
+### One Rematch (Prompt Improvement)
+- **Improved Prompt Addition:** *"Enforce strict RFC 6750 Bearer scheme validation (reject any token missing the 'Bearer ' prefix with 401), disable client-side session persistence in the Supabase backend configuration (`persistSession: false`), resolve `.env` from the project root, and include a POST /auth/refresh endpoint for token rotation."*
+- **One-sentence impact:** With this refined specification, the AI generated strict header parsing, prevented server-side session leakage across concurrent users, and delivered seamless token refresh capability out of the box.
+
+### Rematch Conclusion
+Building the authentication lifecycle by hand across Stages 0–6 provided the deep intuition needed to audit token parsing, session isolation, and error handling. An AI's output is directly bounded by the precision of the prompt — and you can only effectively critique its security when you have engineered the doors and guards yourself first.
+
 
 
