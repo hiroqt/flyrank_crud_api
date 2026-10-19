@@ -23,12 +23,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {number} pageNum - Page index (1-based)
  * @returns {Promise<string>} HTML content
  */
-async function getCataloguePage(url, pageNum) {
+async function getCachedPage(url, cacheFile) {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
 
-  const cacheFile = `catalogue-page-${pageNum}.html`;
   const cachePath = path.join(CACHE_DIR, cacheFile);
 
   // 1. Return from cache if present (no network delay needed)
@@ -74,6 +73,10 @@ async function getCataloguePage(url, pageNum) {
   return html;
 }
 
+async function getCataloguePage(url, pageNum) {
+  return getCachedPage(url, `catalogue-page-${pageNum}.html`);
+}
+
 /**
  * Crawls catalogue pages up to MAX_CATALOGUE_PAGES following "next" links.
  * Extracts absolute book links and removes duplicates.
@@ -81,7 +84,7 @@ async function getCataloguePage(url, pageNum) {
 async function crawlCatalogue() {
   let currentUrl = START_URL;
   let pagesCrawled = 0;
-  const discoveredUrls = [];
+  const discoveredBooks = [];
 
   while (currentUrl && pagesCrawled < MAX_CATALOGUE_PAGES) {
     pagesCrawled++;
@@ -99,7 +102,7 @@ async function crawlCatalogue() {
       }
     });
 
-    discoveredUrls.push(...pageBookLinks);
+    discoveredBooks.push(...pageBookLinks.map((productUrl) => ({ productUrl, sourcePage: currentUrl })));
 
     // Follow the site's own "next" pagination link if we haven't reached the limit
     if (pagesCrawled < MAX_CATALOGUE_PAGES) {
@@ -115,20 +118,46 @@ async function crawlCatalogue() {
   }
 
   // Deduplicate URLs
-  const uniqueUrls = Array.from(new Set(discoveredUrls));
+  const uniqueBooks = Array.from(new Map(discoveredBooks.map((book) => [book.productUrl, book])).values());
+  const uniqueUrls = uniqueBooks.map((book) => book.productUrl);
 
   // Checkpoint output
-  console.log(`catalogue_pages=${pagesCrawled} , discovered=${discoveredUrls.length} , unique_urls=${uniqueUrls.length}`);
+  console.log(`catalogue_pages=${pagesCrawled} , discovered=${discoveredBooks.length} , unique_urls=${uniqueUrls.length}`);
 
   return {
     cataloguePages: pagesCrawled,
-    discovered: discoveredUrls,
+    discovered: discoveredBooks.map((book) => book.productUrl),
     uniqueUrls,
+    uniqueBooks,
+  };
+}
+
+async function getBookDetails({ productUrl, sourcePage }) {
+  const cacheName = `${path.basename(path.dirname(new URL(productUrl).pathname))}.html`;
+  const html = await getCachedPage(productUrl, `detail-${cacheName}`);
+  const $ = cheerio.load(html);
+  const product = $('article.product_page');
+  const description = product.find('#product_description').next('p').text().trim() || null;
+
+  return {
+    title: product.find('h1').first().text().trim(),
+    product_url: productUrl,
+    price_text: product.find('.price_color').first().text().trim(),
+    availability_text: product.find('.availability').first().text().replace(/\s+/g, ' ').trim(),
+    rating_text: (product.find('.star-rating').attr('class') || '').split(/\s+/).find((name) => name !== 'star-rating') || null,
+    description,
+    source_page: sourcePage,
+    fetched_at: new Date().toISOString(),
   };
 }
 
 async function main() {
-  await crawlCatalogue();
+  const { uniqueBooks } = await crawlCatalogue();
+  const records = [];
+  for (const book of uniqueBooks) records.push(await getBookDetails(book));
+  fs.writeFileSync(path.join(CACHE_DIR, 'books.json'), `${JSON.stringify(records, null, 2)}\n`);
+  if (records.length) console.log(JSON.stringify(records[0], null, 2));
+  console.log(`detail_pages=${records.length}`);
 }
 
 if (require.main === module) {
@@ -143,6 +172,8 @@ module.exports = {
   START_URL,
   MAX_CATALOGUE_PAGES,
   getCataloguePage,
+  getCachedPage,
   crawlCatalogue,
+  getBookDetails,
   main,
 };
