@@ -24,7 +24,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {number} pageNum - Page index (1-based)
  * @returns {Promise<string>} HTML content
  */
-async function getCachedPage(url, cacheFile) {
+async function getCachedPage(url, cacheFile, metrics) {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
@@ -33,38 +33,52 @@ async function getCachedPage(url, cacheFile) {
 
   // 1. Return from cache if present (no network delay needed)
   if (fs.existsSync(cachePath)) {
+    if (metrics) metrics.cache_hits++;
     const html = fs.readFileSync(cachePath, 'utf-8');
     const sizeBytes = Buffer.byteLength(html, 'utf-8');
     console.log(`[CACHE HIT] ${cacheFile} (${sizeBytes.toLocaleString()} bytes)`);
     return html;
   }
 
-  // 2. Real request -> enforce polite rate limit delay (>= 500ms)
-  console.log(`[DELAY] Waiting ${RATE_LIMIT_DELAY_MS}ms before request to respect server...`);
-  await sleep(RATE_LIMIT_DELAY_MS);
-
-  console.log(`[FETCH] Requesting ${url} (timeout: ${TIMEOUT_MS / 1000}s)`);
-
   let response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        'User-Agent': USER_AGENT,
-      },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (err) {
-    if (err.name === 'TimeoutError') {
-      throw new Error(`Request timed out after ${TIMEOUT_MS / 1000}s for ${url}`);
+  let html;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    console.log(`[DELAY] Waiting ${RATE_LIMIT_DELAY_MS}ms before request to respect server...`);
+    await sleep(RATE_LIMIT_DELAY_MS);
+    console.log(`[FETCH] Requesting ${url} (timeout: ${TIMEOUT_MS / 1000}s)`);
+
+    try {
+      response = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (err) {
+      if (err.name === 'TimeoutError' && attempt === 0) continue;
+      if (err.name === 'TimeoutError') throw new Error(`Request timed out after ${TIMEOUT_MS / 1000}s for ${url}`);
+      throw err;
     }
-    throw err;
+
+    if (response.status !== 200) {
+      if (response.status >= 500 && attempt === 0) {
+        await response.body?.cancel();
+        continue;
+      }
+      const error = new Error(`Fetch failed for ${url} with HTTP status ${response.status} (${response.statusText})`);
+      error.status = response.status;
+      throw error;
+    }
+
+    try {
+      html = await response.text();
+      break;
+    } catch (err) {
+      if (err.name === 'TimeoutError' && attempt === 0) continue;
+      if (err.name === 'TimeoutError') throw new Error(`Request timed out after ${TIMEOUT_MS / 1000}s for ${url}`);
+      throw err;
+    }
   }
 
-  if (response.status !== 200) {
-    throw new Error(`Fetch failed for ${url} with HTTP status ${response.status} (${response.statusText})`);
-  }
-
-  const html = await response.text();
+  if (metrics) metrics.pages_fetched++;
   const sizeBytes = Buffer.byteLength(html, 'utf-8');
 
   // 3. Save to local disk cache
@@ -74,22 +88,32 @@ async function getCachedPage(url, cacheFile) {
   return html;
 }
 
-async function getCataloguePage(url, pageNum) {
-  return getCachedPage(url, `catalogue-page-${pageNum}.html`);
+async function getCataloguePage(url, pageNum, metrics) {
+  return getCachedPage(url, `catalogue-page-${pageNum}.html`, metrics);
 }
 
 /**
  * Crawls catalogue pages up to MAX_CATALOGUE_PAGES following "next" links.
  * Extracts absolute book links and removes duplicates.
  */
-async function crawlCatalogue() {
+async function crawlCatalogue({ metrics = { failed_pages: 0 } } = {}) {
   let currentUrl = START_URL;
   let pagesCrawled = 0;
   const discoveredBooks = [];
 
   while (currentUrl && pagesCrawled < MAX_CATALOGUE_PAGES) {
     pagesCrawled++;
-    const html = await getCataloguePage(currentUrl, pagesCrawled);
+    let html;
+    try {
+      html = await getCataloguePage(currentUrl, pagesCrawled, metrics);
+    } catch (error) {
+      metrics.failed_pages++;
+      console.error(`[PAGE FAILED] ${currentUrl}: ${error.message}`);
+      currentUrl = pagesCrawled < MAX_CATALOGUE_PAGES
+        ? new URL(`/catalogue/page-${pagesCrawled + 1}.html`, BASE_URL).href
+        : null;
+      continue;
+    }
     const $ = cheerio.load(html);
 
     // Extract book links on this page
@@ -136,10 +160,10 @@ async function crawlCatalogue() {
   };
 }
 
-async function getBookDetails({ productUrl, sourcePage }) {
+async function getBookDetails({ productUrl, sourcePage }, metrics) {
   const cacheName = `${path.basename(path.dirname(new URL(productUrl).pathname))}.html`;
   const cacheFile = `detail-${cacheName}`;
-  const html = await getCachedPage(productUrl, cacheFile);
+  const html = await getCachedPage(productUrl, cacheFile, metrics);
   const $ = cheerio.load(html);
   const product = $('article.product_page');
   const description = product.find('#product_description').next('p').text().trim() || null;
@@ -158,23 +182,66 @@ async function getBookDetails({ productUrl, sourcePage }) {
   };
 }
 
-async function main() {
-  const { uniqueBooks } = await crawlCatalogue();
-  const recordsByUrl = new Map();
-  const errors = [];
-  for (const book of uniqueBooks) {
-    const record = await getBookDetails(book);
-    const result = bookSchema.safeParse(record);
-    if (result.success) recordsByUrl.set(result.data.product_url, result.data);
-    else errors.push({ record, reason: result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') });
-  }
-  const records = Array.from(recordsByUrl.values());
+async function main({ extraBooks = [], catalogueBooks, bookDetailsFetcher = getBookDetails } = {}) {
+  const startedAt = new Date();
+  const metrics = { pages_fetched: 0, cache_hits: 0, valid_records: 0, invalid_records: 0, failed_pages: 0 };
   const outputDir = path.resolve(__dirname, '../output');
   fs.mkdirSync(outputDir, { recursive: true });
+  const errors = [];
+  const recordsByUrl = new Map();
+
+  let uniqueBooks = [];
+  try {
+    uniqueBooks = catalogueBooks || (await crawlCatalogue({ metrics })).uniqueBooks;
+    const booksByUrl = new Map();
+    for (const book of [...uniqueBooks, ...extraBooks]) {
+      try {
+        const productUrl = new URL(book.productUrl).href;
+        if (!booksByUrl.has(productUrl)) booksByUrl.set(productUrl, { ...book, productUrl });
+      } catch (error) {
+        metrics.failed_pages++;
+        errors.push({ product_url: book.productUrl, source_page: book.sourcePage, reason: error.message });
+        console.error(`[PAGE FAILED] ${book.productUrl}: ${error.message}`);
+      }
+    }
+
+    uniqueBooks = Array.from(booksByUrl.values());
+    for (const book of uniqueBooks) {
+      let record;
+      try {
+        record = await bookDetailsFetcher(book, metrics);
+      } catch (error) {
+        metrics.failed_pages++;
+        errors.push({ product_url: book.productUrl, source_page: book.sourcePage, reason: error.message });
+        console.error(`[PAGE FAILED] ${book.productUrl}: ${error.message}`);
+        continue;
+      }
+      const result = bookSchema.safeParse(record);
+      if (result.success) recordsByUrl.set(result.data.product_url, result.data);
+      else {
+        metrics.invalid_records++;
+        errors.push({ record, reason: result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') });
+      }
+    }
+  } catch (error) {
+    metrics.failed_pages++;
+    errors.push({ reason: error.message });
+    console.error(`[RUN FAILED] ${error.message}`);
+  }
+
+  const records = Array.from(recordsByUrl.values());
+  metrics.valid_records = records.length;
   fs.writeFileSync(path.join(outputDir, 'books.json'), `${JSON.stringify(records, null, 2)}\n`);
   fs.writeFileSync(path.join(outputDir, 'errors.json'), `${JSON.stringify(errors, null, 2)}\n`);
+  const report = {
+    start_time: startedAt.toISOString(),
+    duration_ms: Date.now() - startedAt.getTime(),
+    ...metrics,
+  };
+  fs.writeFileSync(path.join(outputDir, 'run-report.json'), `${JSON.stringify(report, null, 2)}\n`);
   if (records.length) console.log(JSON.stringify(records[0], null, 2));
-  console.log(`detail_pages=${uniqueBooks.length} valid_records=${records.length} errors=${errors.length}`);
+  console.log(`detail_pages=${uniqueBooks.length} valid_records=${records.length} invalid_records=${metrics.invalid_records} failed_pages=${metrics.failed_pages}`);
+  return report;
 }
 
 if (require.main === module) {
