@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
+const bookSchema = require('./bookSchema');
 
 const BASE_URL = 'https://books.toscrape.com';
 const START_URL = `${BASE_URL}/catalogue/page-1.html`;
@@ -118,7 +119,10 @@ async function crawlCatalogue() {
   }
 
   // Deduplicate URLs
-  const uniqueBooks = Array.from(new Map(discoveredBooks.map((book) => [book.productUrl, book])).values());
+  const uniqueBooks = Array.from(new Map(discoveredBooks.map((book) => {
+    const productUrl = new URL(book.productUrl).href;
+    return [productUrl, { ...book, productUrl }];
+  })).values());
   const uniqueUrls = uniqueBooks.map((book) => book.productUrl);
 
   // Checkpoint output
@@ -134,30 +138,43 @@ async function crawlCatalogue() {
 
 async function getBookDetails({ productUrl, sourcePage }) {
   const cacheName = `${path.basename(path.dirname(new URL(productUrl).pathname))}.html`;
-  const html = await getCachedPage(productUrl, `detail-${cacheName}`);
+  const cacheFile = `detail-${cacheName}`;
+  const html = await getCachedPage(productUrl, cacheFile);
   const $ = cheerio.load(html);
   const product = $('article.product_page');
   const description = product.find('#product_description').next('p').text().trim() || null;
+  const priceText = product.find('.price_color').first().text().trim();
 
   return {
     title: product.find('h1').first().text().trim(),
-    product_url: productUrl,
-    price_text: product.find('.price_color').first().text().trim(),
+    product_url: new URL(productUrl).href,
+    price_text: priceText,
+    price_gbp: Number(priceText.replace(/,/g, '').replace(/[^\d.]/g, '')),
     availability_text: product.find('.availability').first().text().replace(/\s+/g, ' ').trim(),
     rating_text: (product.find('.star-rating').attr('class') || '').split(/\s+/).find((name) => name !== 'star-rating') || null,
     description,
-    source_page: sourcePage,
-    fetched_at: new Date().toISOString(),
+    source_page: new URL(sourcePage).href,
+    fetched_at: fs.statSync(path.join(CACHE_DIR, cacheFile)).mtime.toISOString(),
   };
 }
 
 async function main() {
   const { uniqueBooks } = await crawlCatalogue();
-  const records = [];
-  for (const book of uniqueBooks) records.push(await getBookDetails(book));
-  fs.writeFileSync(path.join(CACHE_DIR, 'books.json'), `${JSON.stringify(records, null, 2)}\n`);
+  const recordsByUrl = new Map();
+  const errors = [];
+  for (const book of uniqueBooks) {
+    const record = await getBookDetails(book);
+    const result = bookSchema.safeParse(record);
+    if (result.success) recordsByUrl.set(result.data.product_url, result.data);
+    else errors.push({ record, reason: result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') });
+  }
+  const records = Array.from(recordsByUrl.values());
+  const outputDir = path.resolve(__dirname, '../output');
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, 'books.json'), `${JSON.stringify(records, null, 2)}\n`);
+  fs.writeFileSync(path.join(outputDir, 'errors.json'), `${JSON.stringify(errors, null, 2)}\n`);
   if (records.length) console.log(JSON.stringify(records[0], null, 2));
-  console.log(`detail_pages=${records.length}`);
+  console.log(`detail_pages=${uniqueBooks.length} valid_records=${records.length} errors=${errors.length}`);
 }
 
 if (require.main === module) {
