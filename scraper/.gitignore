@@ -3,4 +3,7 @@ node_modules/
 data/
 cache/
 output/
+!output/
+output/*
+!output/books.json
 *.log
