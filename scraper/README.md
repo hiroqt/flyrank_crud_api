@@ -14,7 +14,7 @@
 npm ci && node scraper/src/index.js
 ```
 
-The run writes `scraper/output/books.json`, `scraper/output/errors.json`, and `scraper/output/run-report.json`. The repository includes `scraper/output/books.json` as a sample; generated reports and errors stay local.
+The run writes `scraper/output/books.json`, `scraper/output/books.csv`, `scraper/output/errors.json`, and `scraper/output/run-report.json`. The repository includes `scraper/output/books.json` as a sample; generated reports and errors stay local.
 
 ## Record schema
 
@@ -33,6 +33,8 @@ The run writes `scraper/output/books.json`, `scraper/output/errors.json`, and `s
 | `fetched_at` | ISO timestamp string | Yes | Time the cached page was first fetched |
 
 Records that fail validation are excluded from `books.json` and written to `errors.json` with a reason.
+
+`books.csv` uses the same scalar fields and column order. No nested values need flattening; a null description becomes a blank cell, so CSV cannot distinguish null from an empty string. Cells starting with spreadsheet formula characters get a leading apostrophe.
 
 ## Politeness and recovery
 

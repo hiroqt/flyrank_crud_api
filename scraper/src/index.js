@@ -15,6 +15,10 @@ const TIMEOUT_MS = 8000;
 const RATE_LIMIT_DELAY_MS = 500;
 const MAX_CATALOGUE_PAGES = 3;
 const CACHE_DIR = path.resolve(__dirname, '../cache');
+const CSV_FIELDS = [
+  'title', 'product_url', 'price_text', 'price_gbp', 'availability_text',
+  'rating_text', 'description', 'source_page', 'fetched_at',
+];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -182,6 +186,16 @@ async function getBookDetails({ productUrl, sourcePage }, metrics) {
   };
 }
 
+function toCsv(records) {
+  const escapeCell = (value) => {
+    let cell = value == null ? '' : String(value);
+    if (/^[\s]*[=+\-@]/.test(cell)) cell = `'${cell}`;
+    return /[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+  };
+  const rows = records.map((record) => CSV_FIELDS.map((field) => escapeCell(record[field])).join(','));
+  return [CSV_FIELDS.join(','), ...rows, ''].join('\n');
+}
+
 async function main({ extraBooks = [], catalogueBooks, bookDetailsFetcher = getBookDetails } = {}) {
   const startedAt = new Date();
   const metrics = { pages_fetched: 0, cache_hits: 0, valid_records: 0, invalid_records: 0, failed_pages: 0 };
@@ -232,6 +246,7 @@ async function main({ extraBooks = [], catalogueBooks, bookDetailsFetcher = getB
   const records = Array.from(recordsByUrl.values());
   metrics.valid_records = records.length;
   fs.writeFileSync(path.join(outputDir, 'books.json'), `${JSON.stringify(records, null, 2)}\n`);
+  fs.writeFileSync(path.join(outputDir, 'books.csv'), toCsv(records));
   fs.writeFileSync(path.join(outputDir, 'errors.json'), `${JSON.stringify(errors, null, 2)}\n`);
   const report = {
     start_time: startedAt.toISOString(),
@@ -259,5 +274,6 @@ module.exports = {
   getCachedPage,
   crawlCatalogue,
   getBookDetails,
+  toCsv,
   main,
 };

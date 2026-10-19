@@ -45,10 +45,13 @@ test('keeps good books after a fake page fails and retries only transient failur
     });
     const outputDir = path.resolve(__dirname, '../output');
     const books = JSON.parse(fs.readFileSync(path.join(outputDir, 'books.json'), 'utf8'));
+    const csv = fs.readFileSync(path.join(outputDir, 'books.csv'), 'utf8');
     const errors = JSON.parse(fs.readFileSync(path.join(outputDir, 'errors.json'), 'utf8'));
     const savedReport = JSON.parse(fs.readFileSync(path.join(outputDir, 'run-report.json'), 'utf8'));
     assert.equal(books.length, 60);
     assert.equal(new Set(books.map((book) => book.product_url)).size, 60);
+    assert.match(csv, /^title,product_url,price_text,price_gbp,availability_text,rating_text,description,source_page,fetched_at\n/);
+    assert.match(csv, /https:\/\/books\.toscrape\.com\/catalogue\/good-book-0\/index\.html/);
     assert.equal(errors.length, 1);
     assert.match(errors[0].reason, /HTTP status 404/);
     assert.equal(calls.length, 2);
